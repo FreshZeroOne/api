@@ -1,64 +1,65 @@
 from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
-import json
+import os
 
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'dein-sicherer-schluessel-hier'  # Ersetze diesen Schlüssel durch einen sicheren Wert
+
+# Konfiguration für JWT und die MySQL-Datenbank
+app.config['JWT_SECRET_KEY'] = 'weilisso001'  # Ersetze diesen Schlüssel durch einen sicheren Wert
+# Beispiel einer MySQL-Konfiguration (Passe username, password, host und db nach Bedarf an)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://api_user:weilisso001@85.215.238.89:3306/api_db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialisiere SQLAlchemy und JWTManager
+db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
-# Hilfsfunktionen zum Laden und Speichern der Serverdaten aus der JSON-Datei
-def load_server_data():
-    with open('servers.json', 'r') as f:
-        data = json.load(f)
-    return data
+# -----------------------------------------------------------
+# Datenbankmodelle
+# -----------------------------------------------------------
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='user')
 
-def save_server_data(data):
-    with open('servers.json', 'w') as f:
-        json.dump(data, f, indent=4)
+class Server(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    ip = db.Column(db.String(100), nullable=False)
+    port = db.Column(db.Integer, nullable=False)
+    location = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), nullable=False)
 
-# Hilfsfunktionen zum Laden und Speichern der Benutzerdaten aus einer separaten Datei
-def load_users():
-    try:
-        with open('users.json', 'r') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        data = []
-    return data
-
-def save_users(data):
-    with open('users.json', 'w') as f:
-        json.dump(data, f, indent=4)
-
-# --------------------------------------------------------------------
+# -----------------------------------------------------------
 # Authentifizierungs-Endpunkte
-# Öffentliche Registrierung ist deaktiviert – neue Nutzer werden nur über /create_user erstellt,
-# was nur Administratoren erlaubt ist.
-# --------------------------------------------------------------------
+# Öffentliche Registrierung ist deaktiviert – neue Nutzer werden nur über /create_user
+# erstellt, was nur Administratoren erlaubt.
+# -----------------------------------------------------------
 
-# Login: Bei korrekten Anmeldedaten wird ein JWT-Token zurückgegeben, der den Benutzernamen als Identität
-# und die Rolle im additional_claim "role" enthält.
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data.get('username', None)
-    password = data.get('password', None)
+    username = data.get('username')
+    password = data.get('password')
     if not username or not password:
         return jsonify({'msg': 'Username and password required'}), 400
 
-    users = load_users()
-    user = next((u for u in users if u['username'] == username), None)
-    if not user or not check_password_hash(user['password'], password):
+    user = User.query.filter_by(username=username).first()
+    if not user or not check_password_hash(user.password, password):
         return jsonify({'msg': 'Bad username or password'}), 401
 
-    access_token = create_access_token(identity=username, additional_claims={"role": user.get("role", "user")})
+    # Sende den Benutzernamen als Identität und füge die Rolle über additional_claims hinzu.
+    access_token = create_access_token(identity=username, additional_claims={"role": user.role})
     return jsonify(access_token=access_token), 200
 
-# Geschützter Endpunkt: Neuer Benutzer anlegen – nur für Admins.
+# Endpunkt zum Erstellen eines neuen Users; nur Admins dürfen diesen nutzen.
 @app.route('/create_user', methods=['POST'])
 @jwt_required()
 def create_user():
-    jwt_data = get_jwt()  # Erhalte alle JWT-Claims
+    jwt_data = get_jwt()
     if jwt_data.get("role") != "superuser":
         return jsonify({"msg": "Unauthorized: Only superuser can create new users"}), 403
 
@@ -68,17 +69,16 @@ def create_user():
     if not username or not password:
         return jsonify({"msg": "Username and password required"}), 400
 
-    users = load_users()
-    if any(u["username"] == username for u in users):
+    if User.query.filter_by(username=username).first():
         return jsonify({"msg": "User already exists"}), 400
 
     hashed_password = generate_password_hash(password)
-    new_user = {"username": username, "password": hashed_password, "role": "user"}
-    users.append(new_user)
-    save_users(users)
+    new_user = User(username=username, password=hashed_password, role='user')
+    db.session.add(new_user)
+    db.session.commit()
     return jsonify({"msg": "User created successfully"}), 201
 
-# Geschützter Endpunkt: Benutzer löschen – nur für Admins.
+# Endpunkt zum Löschen eines Nutzers; nur Admins dürfen dies durchführen.
 @app.route('/delete_user/<string:username>', methods=['DELETE'])
 @jwt_required()
 def delete_user(username):
@@ -86,71 +86,99 @@ def delete_user(username):
     if jwt_data.get("role") != "superuser":
         return jsonify({"msg": "Unauthorized: Only superuser can delete users"}), 403
 
-    users = load_users()
-    new_users = [u for u in users if u["username"] != username]
-
-    if len(new_users) == len(users):
+    user = User.query.filter_by(username=username).first()
+    if not user:
         return jsonify({"msg": "User not found"}), 404
 
-    save_users(new_users)
+    db.session.delete(user)
+    db.session.commit()
     return jsonify({"msg": "User deleted successfully"}), 200
 
-# --------------------------------------------------------------------
+# -----------------------------------------------------------
 # Endpunkte für die VPN-Serververwaltung
-# --------------------------------------------------------------------
+# -----------------------------------------------------------
 
-# Öffentlicher Endpunkt: Liefert die Liste der VPN-Server.
 @app.route('/servers', methods=['GET'])
 def get_servers():
-    servers = load_server_data()
-    return jsonify(servers)
+    servers = Server.query.all()
+    servers_list = []
+    for s in servers:
+        servers_list.append({
+            "id": s.id,
+            "name": s.name,
+            "ip": s.ip,
+            "port": s.port,
+            "location": s.location,
+            "status": s.status
+        })
+    return jsonify(servers_list)
 
-# Geschützter Endpunkt: Neuer Server hinzufügen (nur für authentifizierte Nutzer).
 @app.route('/servers', methods=['POST'])
 @jwt_required()
 def add_server():
-    new_server = request.get_json()
-    servers = load_server_data()
+    data = request.get_json()
+    # Überprüfe, ob alle erforderlichen Daten vorhanden sind
+    if not all([data.get("name"), data.get("ip"), data.get("port"), data.get("location"), data.get("status")]):
+        return jsonify({"msg": "Missing data for server"}), 400
+    
+    new_server = Server(
+        name = data["name"],
+        ip = data["ip"],
+        port = data["port"],
+        location = data["location"],
+        status = data["status"]
+    )
+    db.session.add(new_server)
+    db.session.commit()
+    return jsonify({
+        "id": new_server.id,
+        "name": new_server.name,
+        "ip": new_server.ip,
+        "port": new_server.port,
+        "location": new_server.location,
+        "status": new_server.status
+    }), 201
 
-    new_id = max([s["id"] for s in servers], default=0) + 1
-    new_server["id"] = new_id
-    servers.append(new_server)
-
-    save_server_data(servers)
-    return jsonify(new_server), 201
-
-# Geschützter Endpunkt: Vorhandenen Server aktualisieren.
 @app.route('/servers/<int:server_id>', methods=['PUT'])
 @jwt_required()
 def update_server(server_id):
-    updated_data = request.get_json()
-    servers = load_server_data()
-    updated_server = None
-
-    for s in servers:
-        if s["id"] == server_id:
-            s.update(updated_data)
-            updated_server = s
-            break
-
-    if updated_server:
-        save_server_data(servers)
-        return jsonify(updated_server)
-    else:
+    data = request.get_json()
+    server = Server.query.get(server_id)
+    if not server:
         return jsonify({"error": "Server not found"}), 404
 
-# Geschützter Endpunkt: Einen Server löschen.
+    server.name = data.get("name", server.name)
+    server.ip = data.get("ip", server.ip)
+    server.port = data.get("port", server.port)
+    server.location = data.get("location", server.location)
+    server.status = data.get("status", server.status)
+    db.session.commit()
+
+    return jsonify({
+        "id": server.id,
+        "name": server.name,
+        "ip": server.ip,
+        "port": server.port,
+        "location": server.location,
+        "status": server.status
+    })
+
 @app.route('/servers/<int:server_id>', methods=['DELETE'])
 @jwt_required()
 def delete_server(server_id):
-    servers = load_server_data()
-    new_servers = [s for s in servers if s["id"] != server_id]
-
-    if len(new_servers) == len(servers):
+    server = Server.query.get(server_id)
+    if not server:
         return jsonify({"error": "Server not found"}), 404
 
-    save_server_data(new_servers)
+    db.session.delete(server)
+    db.session.commit()
     return jsonify({"message": "Server deleted."})
 
+# -----------------------------------------------------------
+# Anwendung starten
+# -----------------------------------------------------------
 if __name__ == '__main__':
+    # Erstelle die Tabellen, falls diese noch nicht existieren
+    with app.app_context():
+        db.create_all()
     app.run(host='0.0.0.0', port=5000)

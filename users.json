@@ -1,0 +1,12 @@
+[
+    {
+        "username": "rene",
+        "password": "scrypt:32768:8:1$ysLKBO5QnwaU9nHD$d3837504c5f79584e55a13e856e00f801f4c83a93e960597a97a1e40131d00e0461c7580fcfe022dfabfee171ae82b206c2c8234a0515d06e71d06575b7defb5",
+        "role": "superuser"
+    },
+    {
+        "username": "renrre",
+        "password": "scrypt:32768:8:1$coatIVOAiU4tljgI$daf273a4472ddb81206600af1f551dd52dcaa6d6462b28ed3af82a157e58ee8537410444aaa28246e19de01278fc8642b1063f353544bc660cf44f565728e540",
+        "role": "user"
+    }
+]

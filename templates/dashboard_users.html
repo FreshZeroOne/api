@@ -1,0 +1,61 @@
+<!-- templates/dashboard_users.html -->
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Benutzer Verwaltung</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+</head>
+<body>
+  <nav class="navbar navbar-default">
+    <!-- Navigation, wie zuvor -->
+    <div class="container-fluid">
+      <div class="navbar-header">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">Admin Dashboard</a>
+      </div>
+      <ul class="nav navbar-nav">
+        <li><a href="{{ url_for('dashboard') }}">Übersicht</a></li>
+        <li class="active"><a href="{{ url_for('dashboard_users') }}">Benutzer</a></li>
+        <li><a href="{{ url_for('dashboard_servers') }}">Server</a></li>
+      </ul>
+      <ul class="nav navbar-nav navbar-right">
+        <li><a href="{{ url_for('admin_logout') }}">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+  
+  <div class="container">
+    <h2>Benutzer Übersicht</h2>
+    <a href="{{ url_for('edit_user', user_id=0) }}" class="btn btn-success">Neuen Benutzer anlegen</a>
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Username</th>
+          <th>Rolle</th>
+          <th>Aktionen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user.id }}</td>
+          <td>{{ user.username }}</td>
+          <td>{{ user.role }}</td>
+          <td>
+            <a href="{{ url_for('edit_user', user_id=user.id) }}" class="btn btn-primary btn-sm">Bearbeiten</a>
+            <!-- Löschen-Formular -->
+            <form method="POST" action="{{ url_for('delete_user', user_id=user.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Soll dieser Benutzer wirklich gelöscht werden?');">Löschen</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+</body>
+</html>

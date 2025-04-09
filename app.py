@@ -1,29 +1,36 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect, url_for, render_template
 from flask_sqlalchemy import SQLAlchemy
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 import os
 
 app = Flask(__name__)
 
-# Konfiguration für JWT und die MySQL-Datenbank
-app.config['JWT_SECRET_KEY'] = 'weilisso001'  # Ersetze diesen Schlüssel durch einen sicheren Wert
-# Beispiel einer MySQL-Konfiguration (Passe username, password, host und db nach Bedarf an)
+# Konfiguration
+app.config['SECRET_KEY'] = 'ein_sehr_geheimer_key_123456'  # Langer, zufälliger String
+app.config['JWT_SECRET_KEY'] = 'weilisso001'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://api_user:weilisso001@85.215.238.89:3306/api_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialisiere SQLAlchemy und JWTManager
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
-# -----------------------------------------------------------
+# Flask-Login Setup
+login_manager = LoginManager(app)
+login_manager.login_view = 'admin_login'
+
+# ------------------------------
 # Datenbankmodelle
-# -----------------------------------------------------------
-class User(db.Model):
+# ------------------------------
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(20), nullable=False, default='user')
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
 
 class Server(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -32,153 +39,207 @@ class Server(db.Model):
     port = db.Column(db.Integer, nullable=False)
     location = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(20), nullable=False)
+    
+    def __repr__(self):
+        return f'<Server {self.name}>'
 
-# -----------------------------------------------------------
-# Authentifizierungs-Endpunkte
-# Öffentliche Registrierung ist deaktiviert – neue Nutzer werden nur über /create_user
-# erstellt, was nur Administratoren erlaubt.
-# -----------------------------------------------------------
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
+# ------------------------------
+# Admin-Login Routen (Flask-Login)
+# ------------------------------
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = User.query.filter_by(username=username).first()
+        # Nur Admins oder Superuser sind berechtigt
+        if user and check_password_hash(user.password, password) and user.role in ['admin', 'superuser']:
+            login_user(user)
+            next_url = request.args.get('next')
+            return redirect(next_url or url_for('dashboard'))
+        else:
+            return render_template('admin_login.html', error="Invalid credentials or unauthorized.")
+    return render_template('admin_login.html')
+
+@app.route('/admin/logout')
+@login_required
+def admin_logout():
+    logout_user()
+    return redirect(url_for('admin_login'))
+
+# ------------------------------
+# Dashboard-Route (eigenes Template)
+# ------------------------------
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Prüfe, ob der Benutzer Adminrechte hat
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+    users = User.query.all()
+    servers = Server.query.all()
+    return render_template('admin_dashboard.html', users=users, servers=servers)
+
+# Route: Benutzerverwaltung – zeigt alle Benutzer in einem eigenen Template
+@app.route('/dashboard/benutzer')
+@login_required
+def dashboard_users():
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+    users = User.query.all()
+    return render_template('dashboard_users.html', users=users)
+
+# Route: Serververwaltung – zeigt alle Server in einem eigenen Template
+@app.route('/dashboard/server')
+@login_required
+def dashboard_servers():
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+    servers = Server.query.all()
+    return render_template('dashboard_servers.html', servers=servers)
+
+# ------------------------------
+# Bearbeitungsrouten für Benutzer
+# ------------------------------
+@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+def edit_user(user_id):
+    # Zugriff nur für Admins/Superuser
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+    
+    # Falls user_id = 0, behandeln wir es als Neuanlage
+    if user_id == 0:
+        user = None
+    else:
+        user = User.query.get_or_404(user_id)
+    
+    if request.method == 'POST':
+        username = request.form.get('username')
+        role = request.form.get('role')
+        # Lese beide Passwortfelder
+        password = request.form.get('password')
+        password_confirm = request.form.get('password_confirm')
+        
+        # Falls ein neuer Benutzer angelegt wird:
+        if user is None:
+            if not username or not password or not password_confirm:
+                error = "Username und beide Passwortfelder sind erforderlich."
+                return render_template('edit_user.html', error=error, user=None)
+            if password != password_confirm:
+                error = "Die Passwörter stimmen nicht überein."
+                return render_template('edit_user.html', error=error, user=None)
+            new_user = User(username=username,
+                            password=generate_password_hash(password),
+                            role=role)
+            db.session.add(new_user)
+            db.session.commit()
+        else:
+            # Bestehenden Benutzer aktualisieren:
+            user.username = username
+            user.role = role
+            # Falls Felder zur Passwortänderung ausgefüllt wurden:
+            if password or password_confirm:
+                if password != password_confirm:
+                    error = "Die Passwörter stimmen nicht überein."
+                    return render_template('edit_user.html', error=error, user=user)
+                user.password = generate_password_hash(password)
+            db.session.commit()
+        return redirect(url_for('dashboard_users'))
+    return render_template('edit_user.html', user=user)
+
+
+# ------------------------------
+# Löschen für Benutzer
+# ------------------------------
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
+@login_required
+def delete_user(user_id):
+    # Nur Admins oder Superuser dürfen löschen
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+    
+    user = User.query.get_or_404(user_id)
+    db.session.delete(user)
+    db.session.commit()
+    return redirect(url_for('dashboard_users'))
+
+# ------------------------------
+# Bearbeitungsrouten für Server
+# ------------------------------
+@app.route('/edit_server/<int:server_id>', methods=['GET', 'POST'])
+@login_required
+def edit_server(server_id):
+    # Nur Admins oder Superuser dürfen bearbeiten oder anlegen
+    if current_user.role not in ['admin', 'superuser']:
+        return redirect(url_for('admin_login'))
+        
+    # Wenn server_id == 0, handelt es sich um eine Neuanlage
+    if server_id == 0:
+        server = None
+    else:
+        server = Server.query.get_or_404(server_id)
+        
+    if request.method == 'POST':
+        name = request.form.get('name')
+        ip = request.form.get('ip')
+        port = request.form.get('port')
+        location = request.form.get('location')
+        status = request.form.get('status')
+        
+        # Überprüfe, ob alle Felder ausgefüllt sind
+        if not (name and ip and port and location and status):
+            error = "Alle Felder müssen ausgefüllt sein."
+            return render_template('edit_server.html', error=error, server=server)
+        
+        if server is None:
+            # Neuer Server
+            new_server = Server(
+                name=name,
+                ip=ip,
+                port=int(port),
+                location=location,
+                status=status
+            )
+            db.session.add(new_server)
+            db.session.commit()
+        else:
+            # Bestehenden Server aktualisieren
+            server.name = name
+            server.ip = ip
+            server.port = int(port)
+            server.location = location
+            server.status = status
+            db.session.commit()
+            
+        return redirect(url_for('dashboard_servers'))
+    
+    return render_template('edit_server.html', server=server)
+
+# ------------------------------
+# Beispiel-API-Routen (JWT-geschützt) – falls nötig
+# ------------------------------
 @app.route('/login', methods=['POST'])
-def login():
+def api_login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
     if not username or not password:
         return jsonify({'msg': 'Username and password required'}), 400
-
     user = User.query.filter_by(username=username).first()
     if not user or not check_password_hash(user.password, password):
         return jsonify({'msg': 'Bad username or password'}), 401
-
-    # Sende den Benutzernamen als Identität und füge die Rolle über additional_claims hinzu.
     access_token = create_access_token(identity=username, additional_claims={"role": user.role})
     return jsonify(access_token=access_token), 200
 
-# Endpunkt zum Erstellen eines neuen Users; nur Admins dürfen diesen nutzen.
-@app.route('/create_user', methods=['POST'])
-@jwt_required()
-def create_user():
-    jwt_data = get_jwt()
-    if jwt_data.get("role") != "superuser":
-        return jsonify({"msg": "Unauthorized: Only superuser can create new users"}), 403
+# Weitere API-Routen können analog hinzugefügt werden.
 
-    data = request.get_json()
-    username = data.get("username")
-    password = data.get("password")
-    if not username or not password:
-        return jsonify({"msg": "Username and password required"}), 400
-
-    if User.query.filter_by(username=username).first():
-        return jsonify({"msg": "User already exists"}), 400
-
-    hashed_password = generate_password_hash(password)
-    new_user = User(username=username, password=hashed_password, role='user')
-    db.session.add(new_user)
-    db.session.commit()
-    return jsonify({"msg": "User created successfully"}), 201
-
-# Endpunkt zum Löschen eines Nutzers; nur Admins dürfen dies durchführen.
-@app.route('/delete_user/<string:username>', methods=['DELETE'])
-@jwt_required()
-def delete_user(username):
-    jwt_data = get_jwt()
-    if jwt_data.get("role") != "superuser":
-        return jsonify({"msg": "Unauthorized: Only superuser can delete users"}), 403
-
-    user = User.query.filter_by(username=username).first()
-    if not user:
-        return jsonify({"msg": "User not found"}), 404
-
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({"msg": "User deleted successfully"}), 200
-
-# -----------------------------------------------------------
-# Endpunkte für die VPN-Serververwaltung
-# -----------------------------------------------------------
-
-@app.route('/servers', methods=['GET'])
-def get_servers():
-    servers = Server.query.all()
-    servers_list = []
-    for s in servers:
-        servers_list.append({
-            "id": s.id,
-            "name": s.name,
-            "ip": s.ip,
-            "port": s.port,
-            "location": s.location,
-            "status": s.status
-        })
-    return jsonify(servers_list)
-
-@app.route('/servers', methods=['POST'])
-@jwt_required()
-def add_server():
-    data = request.get_json()
-    # Überprüfe, ob alle erforderlichen Daten vorhanden sind
-    if not all([data.get("name"), data.get("ip"), data.get("port"), data.get("location"), data.get("status")]):
-        return jsonify({"msg": "Missing data for server"}), 400
-    
-    new_server = Server(
-        name = data["name"],
-        ip = data["ip"],
-        port = data["port"],
-        location = data["location"],
-        status = data["status"]
-    )
-    db.session.add(new_server)
-    db.session.commit()
-    return jsonify({
-        "id": new_server.id,
-        "name": new_server.name,
-        "ip": new_server.ip,
-        "port": new_server.port,
-        "location": new_server.location,
-        "status": new_server.status
-    }), 201
-
-@app.route('/servers/<int:server_id>', methods=['PUT'])
-@jwt_required()
-def update_server(server_id):
-    data = request.get_json()
-    server = Server.query.get(server_id)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    server.name = data.get("name", server.name)
-    server.ip = data.get("ip", server.ip)
-    server.port = data.get("port", server.port)
-    server.location = data.get("location", server.location)
-    server.status = data.get("status", server.status)
-    db.session.commit()
-
-    return jsonify({
-        "id": server.id,
-        "name": server.name,
-        "ip": server.ip,
-        "port": server.port,
-        "location": server.location,
-        "status": server.status
-    })
-
-@app.route('/servers/<int:server_id>', methods=['DELETE'])
-@jwt_required()
-def delete_server(server_id):
-    server = Server.query.get(server_id)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    db.session.delete(server)
-    db.session.commit()
-    return jsonify({"message": "Server deleted."})
-
-# -----------------------------------------------------------
-# Anwendung starten
-# -----------------------------------------------------------
 if __name__ == '__main__':
-    # Erstelle die Tabellen, falls diese noch nicht existieren
     with app.app_context():
         db.create_all()
+        app.debug = True  # Debugmodus aktivieren
     app.run(host='0.0.0.0', port=5000)

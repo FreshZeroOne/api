@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard Übersicht</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+</head>
+<body>
+  <nav class="navbar navbar-default">
+    <div class="container-fluid">
+      <!-- Markenlogo -->
+      <div class="navbar-header">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">Admin Dashboard</a>
+      </div>
+      <!-- Navigation Links -->
+      <ul class="nav navbar-nav">
+        <li><a href="{{ url_for('dashboard') }}">Übersicht</a></li>
+        <li><a href="{{ url_for('dashboard_users') }}">Benutzer</a></li>
+        <li><a href="{{ url_for('dashboard_servers') }}">Server</a></li>
+      </ul>
+      <!-- Logout -->
+      <ul class="nav navbar-nav navbar-right">
+        <li><a href="{{ url_for('admin_logout') }}">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>Willkommen im Admin Dashboard</h1>
+    <p>Hier findest du eine Übersicht und kannst zu den spezifischen Verwaltungsseiten navigieren.</p>
+    <!-- Du kannst hier noch Zusammenfassungen (z. B. Statistiken) anzeigen -->
+  </div>
+
+  <!-- JavaScript: jQuery und Bootstrap -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+</body>
+</html>

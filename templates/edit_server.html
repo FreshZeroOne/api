@@ -42,7 +42,10 @@
             <option value="offline" {% if server and server.status == 'offline' %}selected{% endif %}>Offline</option>
             <option value="wartung" {% if server and server.status == 'wartung' %}selected{% endif %}>Wartung</option>
           </select>
-        <input type="text" name="status" class="form-control" id="status" value="{% if server %}{{ server.status }}{% endif %}" required>
+      </div>
+      <div class="form-group">
+        <label for="peer_public_key">VPN Peer Public Key</label>
+        <input type="text" name="peer_public_key" class="form-control" id="peer_public_key" value="{% if server and server.peer_public_key %}{{ server.peer_public_key }}{% endif %}">
       </div>
       <button type="submit" class="btn btn-primary">Speichern</button>
       <a href="{{ url_for('dashboard_servers') }}" class="btn btn-default">Abbrechen</a>

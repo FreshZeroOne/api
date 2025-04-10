@@ -4,6 +4,15 @@
   <meta charset="UTF-8">
   <title>{% if server %}Server bearbeiten{% else %}Neuen Server anlegen{% endif %}</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+  <style>
+    .health-card {
+      margin-bottom: 20px;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -14,42 +23,62 @@
         Neuen Server anlegen
       {% endif %}
     </h2>
-    {% if error %}
-      <div class="alert alert-danger">{{ error }}</div>
-    {% endif %}
-    <!-- Wenn server vorhanden, verwende user.id, sonst 0 -->
-    <form method="POST" action="{{ url_for('edit_server', server_id=server.id if server else 0) }}">
-      <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" name="name" class="form-control" id="name" value="{% if server %}{{ server.name }}{% endif %}" required>
+    <div class="row">
+      <!-- Formular-Spalte -->
+      <div class="col-md-8">
+        {% if error %}
+          <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+        <form method="POST" action="{{ url_for('edit_server', server_id=server.id if server else 0) }}">
+          <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" name="name" class="form-control" id="name" value="{% if server %}{{ server.name }}{% endif %}" required>
+          </div>
+          <div class="form-group">
+            <label for="ip">IP</label>
+            <input type="text" name="ip" class="form-control" id="ip" value="{% if server %}{{ server.ip }}{% endif %}" required>
+          </div>
+          <div class="form-group">
+            <label for="port">Port</label>
+            <input type="number" name="port" class="form-control" id="port" value="{% if server %}{{ server.port }}{% endif %}" required>
+          </div>
+          <div class="form-group">
+            <label for="location">Standort</label>
+            <input type="text" name="location" class="form-control" id="location" value="{% if server %}{{ server.location }}{% endif %}" required>
+          </div>
+          <div class="form-group">
+            <label for="status">Status</label>
+            <input type="text" name="status" class="form-control" id="status" value="{% if server %}{{ server.status }}{% endif %}" required>
+          </div>
+          <div class="form-group">
+            <label for="ssh_private_key">VPN SSH Private Key</label>
+            <input type="text" name="ssh_private_key" class="form-control" id="ssh_private_key" placeholder="Neuen privaten SSH Key hier eingeben (falls ändern)" >
+            {% if server and server.ssh_private_key %}
+              <p class="help-block">Hinweis: Aus Sicherheitsgründen wird der vorhandene Schlüssel nicht angezeigt.</p>
+            {% endif %}
+          </div>
+          
+          
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <a href="{{ url_for('dashboard_servers') }}" class="btn btn-default">Abbrechen</a>
+        </form>
       </div>
-      <div class="form-group">
-        <label for="ip">IP</label>
-        <input type="text" name="ip" class="form-control" id="ip" value="{% if server %}{{ server.ip }}{% endif %}" required>
+      <!-- Health-Card-Spalte -->
+      <div class="col-md-4">
+        {% if metrics %}
+        <div class="health-card">
+          <h4>Health-Status</h4>
+          <p><strong>Running Time:</strong> {{ metrics.running_time }}</p>
+          <p><strong>Aktive VPN-Peers:</strong> {{ metrics.active_peers }}</p>
+          <p><strong>RAM (Total / Used / Free):</strong> {{ metrics.ram_total }} / {{ metrics.ram_used }} / {{ metrics.ram_free }} MB</p>
+          <p><strong>CPU Usage:</strong> {{ metrics.cpu_usage }}%</p>
+          <p><strong>Anzahl Benutzer:</strong> {{ metrics.user_count }}</p>
+        </div>
+        {% else %}
+          <div class="alert alert-info">Keine Health-Daten verfügbar.</div>
+        {% endif %}
       </div>
-      <div class="form-group">
-        <label for="port">Port</label>
-        <input type="number" name="port" class="form-control" id="port" value="{% if server %}{{ server.port }}{% endif %}" required>
-      </div>
-      <div class="form-group">
-        <label for="location">Standort</label>
-        <input type="text" name="location" class="form-control" id="location" value="{% if server %}{{ server.location }}{% endif %}" required>
-      </div>
-      <div class="form-group">
-        <label for="status">Status</label>
-        <select class="form-control" name="status" id="status">
-            <option value="online" {% if server and server.status == 'online' %}selected{% endif %}>Online</option>
-            <option value="offline" {% if server and server.status == 'offline' %}selected{% endif %}>Offline</option>
-            <option value="wartung" {% if server and server.status == 'wartung' %}selected{% endif %}>Wartung</option>
-          </select>
-      </div>
-      <div class="form-group">
-        <label for="peer_public_key">VPN Peer Public Key</label>
-        <input type="text" name="peer_public_key" class="form-control" id="peer_public_key" value="{% if server and server.peer_public_key %}{{ server.peer_public_key }}{% endif %}">
-      </div>
-      <button type="submit" class="btn btn-primary">Speichern</button>
-      <a href="{{ url_for('dashboard_servers') }}" class="btn btn-default">Abbrechen</a>
-    </form>
+    </div>
   </div>
   
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>

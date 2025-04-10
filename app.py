@@ -41,10 +41,11 @@ class Server(db.Model):
     port = db.Column(db.Integer, nullable=False)
     location = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(20), nullable=False)
-    peer_public_key = db.Column(db.String(200), nullable=True)  # Neues Feld für den öffentlichen Schlüssel
+    ssh_private_key = db.Column(db.Text, nullable=True)  # Neuer Name, um den privaten SSH-Key zu speichern
 
     def __repr__(self):
         return f'<Server {self.name}>'
+
 
 
 @login_manager.user_loader
@@ -55,7 +56,35 @@ def load_user(user_id):
 from flask_migrate import Migrate
 migrate = Migrate(app, db)
 
+# --- cryptography-Setup ---
+from dotenv import load_dotenv
+
+load_dotenv()  # Lädt die Variablen aus der .env-Datei in os.environ
+
+ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
+if not ENCRYPTION_KEY:
+    raise Exception("ENCRYPTION_KEY ist nicht gesetzt!")
+from cryptography.fernet import Fernet
+fernet = Fernet(ENCRYPTION_KEY)
+
+
+
+
 # --- Helper-Funktion für die Servermetriken ---
+def reformat_pem(key_str):
+    # Überprüfen, ob bereits Zeilenumbrüche vorhanden sind
+    if "\n" in key_str:
+        return key_str
+    header = "-----BEGIN RSA PRIVATE KEY-----"
+    footer = "-----END RSA PRIVATE KEY-----"
+    # Entferne Header und Footer, falls vorhanden, und säubere den Inhalt
+    content = key_str.replace(header, "").replace(footer, "").strip()
+    # Füge alle 64 Zeichen einen Zeilenumbruch ein
+    lines = [content[i:i+64] for i in range(0, len(content), 64)]
+    # Setze wieder zusammen
+    return header + "\n" + "\n".join(lines) + "\n" + footer + "\n"
+
+
 # Diese Funktion verbindet sich per SSH mit dem Server und führt die gewünschten Befehle aus.
 
 import re
@@ -63,75 +92,65 @@ import paramiko
 from io import StringIO
 
 def get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor'):
-    """
-    Verbindet sich per SSH mit dem VPN-Server und führt mehrere Befehle aus:
-      - "wg show wg0 latest-handshakes" zur Ermittlung der aktiven Peers,
-      - "uptime" zur Erfassung der Systemlast und der Anzahl angemeldeter Benutzer,
-      - "free -m" zur Abfrage des RAM,
-      - "top -bn1 | grep 'Cpu(s)'" zur Ermittlung der CPU-Auslastung.
-      
-    Hinweis: Wir erwarten, dass im Feld server.peer_public_key der private Schlüssel
-    im PEM-Format gespeichert ist.
-    """
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         
-        # Lade den privaten Schlüssel aus der Datenbank (der RSA-Private-Key im PEM-Format)
-        key_data = server.peer_public_key
-        if not key_data:
-            raise Exception("Kein gültiger Schlüssel in der Datenbank gefunden.")
+        encrypted_key = server.ssh_private_key
+        if not encrypted_key:
+            raise Exception("Kein gültiger SSH-Key in der Datenbank gefunden.")
+        
+        # Entschlüsselung des Keys mit Fernet
+        key_data = fernet.decrypt(encrypted_key.encode('utf-8')).decode('utf-8')
+        
+        # Schlüssel neu formatieren, falls Zeilenumbrüche fehlen
+        key_data = reformat_pem(key_data)
+
         key_file = StringIO(key_data)
         private_key = paramiko.RSAKey.from_private_key(key_file)
         
-        client.connect(server.ip, port=ssh_port, username=ssh_user, pkey=private_key, timeout=5)
+        client.connect(server.ip, port=ssh_port, username=ssh_user, pkey=private_key, timeout=5, allow_agent=False)
         
-        # 1. Ermittlung aktiver VPN-Peers
+        # Nutze sudo, falls notwendig:
         stdin, stdout, stderr = client.exec_command("sudo wg show wg0 latest-handshakes", get_pty=True)
-        output = stdout.read().decode("utf-8")
-        print("wg latest-handshakes output:", output)
-        active_peers = len([line for line in output.splitlines() if line.strip()])
+        handshake_output = stdout.read().decode("utf-8")
+        active_peers = len([line for line in handshake_output.splitlines() if line.strip()])
         
-        # 2. Uptime und Benutzerzahl ermitteln
-        stdin, stdout, stderr = client.exec_command("uptime")
+        # Weitere Befehle...
+        stdin, stdout, stderr = client.exec_command("uptime", get_pty=True)
         uptime_output = stdout.read().decode("utf-8").strip()
-        # Regex: Erfasst sowohl "1 user" als auch "X users"
-        match = re.search(r",\s*(\d+)\s+user[s]?", uptime_output)
-        user_count = int(match.group(1)) if match else 0
+        running_match = re.search(r"up ([^,]+,[^,]+),", uptime_output)
+        running_time = running_match.group(1).strip() if running_match else uptime_output
         
-        # 3. RAM-Daten abrufen über "free -m"
-        stdin, stdout, stderr = client.exec_command("free -m")
+        user_match = re.search(r",\s*(\d+)\s+user[s]?", uptime_output)
+        user_count = int(user_match.group(1)) if user_match else 0
+        
+        # RAM über free -m:
+        stdin, stdout, stderr = client.exec_command("free -m", get_pty=True)
         free_output = stdout.read().decode("utf-8")
-        mem_line = None
-        for line in free_output.splitlines():
-            if line.startswith("Mem:"):
-                mem_line = line
-                break
+        mem_line = next((line for line in free_output.splitlines() if line.startswith("Mem:")), None)
         if mem_line:
             parts = mem_line.split()
-            ram_total = parts[1]
-            ram_used = parts[2]
-            ram_free = parts[3]
+            ram_total, ram_used, ram_free = parts[1], parts[2], parts[3]
         else:
             ram_total = ram_used = ram_free = "n/a"
         
-        # 4. CPU-Auslastung abrufen über "top"
-        stdin, stdout, stderr = client.exec_command("top -bn1 | grep 'Cpu(s)'")
+        # CPU über top:
+        stdin, stdout, stderr = client.exec_command("top -bn1 | grep 'Cpu(s)'", get_pty=True)
         cpu_output = stdout.read().decode("utf-8").strip()
         match_cpu = re.search(r"(\d+\.\d+)\s*%?\s*id", cpu_output)
-
         if match_cpu:
             idle = float(match_cpu.group(1))
-            cpu_usage = 100 - idle
-            cpu_usage = round(cpu_usage, 2)
+            cpu_usage = round(100 - idle, 2)
         else:
-            cpu_usage = "0"
+            cpu_usage = "n/a"
         
         client.close()
         
         return {
             "active_peers": active_peers,
             "uptime": uptime_output,
+            "running_time": running_time,
             "user_count": user_count,
             "ram_total": ram_total,
             "ram_used": ram_used,
@@ -139,15 +158,18 @@ def get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor'):
             "cpu_usage": cpu_usage
         }
     except Exception as e:
+        print("Fehler in get_vpn_server_metrics:", e)
         return {
             "active_peers": 0,
             "uptime": str(e),
+            "running_time": "n/a",
             "user_count": 0,
             "ram_total": "n/a",
             "ram_used": "n/a",
             "ram_free": "n/a",
             "cpu_usage": "n/a"
         }
+
 
 
 #--------------------------------------------------------------------------------------------------------------------------
@@ -205,13 +227,28 @@ def dashboard_users():
 @app.route('/dashboard/server')
 @login_required
 def dashboard_servers():
+    # Zugriff nur für Admin oder Superuser
     if current_user.role not in ['admin', 'superuser']:
         return redirect(url_for('admin_login'))
     page = request.args.get('page', 1, type=int)
-    per_page = 10  # Auch hier anpassbar
+    per_page = 10  # Anpassbar
     pagination = Server.query.paginate(page=page, per_page=per_page, error_out=False)
     servers = pagination.items
-    return render_template('dashboard_servers.html', servers=servers, pagination=pagination)
+
+    server_cards = []
+    for server in servers:
+        # Hole die Metriken per SSH (siehe vorherige Implementierung)
+        metrics = get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor')
+        card = {
+            'id': server.id,
+            'name': server.name,
+            'ip': server.ip,
+            'active_peers': metrics.get('active_peers'),
+            'cpu_usage': metrics.get('cpu_usage')
+        }
+        server_cards.append(card)
+
+    return render_template('dashboard_servers.html', server_cards=server_cards, pagination=pagination)
 
 # ------------------------------
 # Bearbeitungsrouten für Benutzer
@@ -289,24 +326,31 @@ def edit_server(server_id):
     if current_user.role not in ['admin', 'superuser']:
         return redirect(url_for('admin_login'))
         
-    # Wenn server_id == 0, handelt es sich um eine Neuanlage
     if server_id == 0:
         server = None
+        metrics = None
     else:
         server = Server.query.get_or_404(server_id)
-        
+        # Health-Metriken abrufen
+        metrics = get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor')
+    
     if request.method == 'POST':
         name = request.form.get('name')
         ip = request.form.get('ip')
         port = request.form.get('port')
         location = request.form.get('location')
         status = request.form.get('status')
-        peer_key = request.form.get('peer_public_key')  # Hier das neue Feld
-        
-        # Überprüfe, ob alle notwendigen Felder ausgefüllt sind (Peer-Key kann optional sein)
+        key_input = request.form.get('ssh_private_key')  # Eingabe des privaten Schlüssels
+
         if not (name and ip and port and location and status):
-            error = "Alle Felder (außer VPN Peer Key) müssen ausgefüllt sein."
-            return render_template('edit_server.html', error=error, server=server)
+            error = "Alle Felder (außer SSH Private Key) müssen ausgefüllt sein."
+            return render_template('edit_server.html', error=error, server=server, metrics=metrics)
+        
+        # Verschlüsselung des SSH-Keys, falls eingetragen
+        if key_input:
+            encrypted_key = fernet.encrypt(key_input.encode('utf-8')).decode('utf-8')
+        else:
+            encrypted_key = None
         
         if server is None:
             new_server = Server(
@@ -315,7 +359,7 @@ def edit_server(server_id):
                 port=int(port),
                 location=location,
                 status=status,
-                peer_public_key=peer_key
+                ssh_private_key=encrypted_key
             )
             db.session.add(new_server)
             db.session.commit()
@@ -325,12 +369,13 @@ def edit_server(server_id):
             server.port = int(port)
             server.location = location
             server.status = status
-            server.peer_public_key = peer_key
+            server.ssh_private_key = encrypted_key
             db.session.commit()
             
         return redirect(url_for('dashboard_servers'))
     
-    return render_template('edit_server.html', server=server)
+    return render_template('edit_server.html', server=server, metrics=metrics)
+
 
 # ------------------------------
 # Löschen für Server
@@ -357,6 +402,9 @@ def server_metrics(server_id):
     if current_user.role not in ['admin', 'superuser']:
         return redirect(url_for('admin_login'))
     server = Server.query.get_or_404(server_id)
+    # Hier rufen wir die Health-Metriken des Servers ab. Achte darauf,
+    # dass get_vpn_server_metrics() korrekt implementiert ist und auch die 'running_time'
+    # und 'user_count' extrahiert.
     metrics = get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor')
     return render_template('server_metrics.html', server=server, metrics=metrics)
 

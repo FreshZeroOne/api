@@ -5,3 +5,5 @@ venv/
 # Python cache files
 __pycache__/
 *.pyc
+#rsa keys
+-----BEGIN RSA PRIVATE KEY-----.txt

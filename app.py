@@ -170,6 +170,32 @@ def get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor'):
             "cpu_usage": "n/a"
         }
 
+# --- Ping-Status-Update-Funktion ---
+# Diese Funktion wird regelmäßig aufgerufen, um den Status der Server zu aktualisieren.
+from pythonping import ping
+
+def update_server_status():
+    with app.app_context():
+        servers = Server.query.all()
+        for server in servers:
+            try:
+                # Sende einen Ping an den Server (z.B. 1 Ping mit Timeout 2 Sekunden)
+                from pythonping import ping
+                response = ping(server.ip, count=1, timeout=2)
+                if response.success():
+                    if server.status != "online":
+                        print(f"Server {server.name} ({server.ip}) is now online.")
+                        server.status = "online"
+                else:
+                    if server.status != "offline":
+                        print(f"Server {server.name} ({server.ip}) is now offline.")
+                        server.status = "offline"
+            except Exception as e:
+                print(f"Fehler beim Pingen von {server.ip}: {e}")
+                if server.status != "offline":
+                    server.status = "offline"
+        db.session.commit()
+
 
 
 #--------------------------------------------------------------------------------------------------------------------------
@@ -204,12 +230,30 @@ def admin_logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    # Prüfe, ob der Benutzer Adminrechte hat
     if current_user.role not in ['admin', 'superuser']:
         return redirect(url_for('admin_login'))
     users = User.query.all()
     servers = Server.query.all()
-    return render_template('admin_dashboard.html', users=users, servers=servers)
+    
+    # Aggregierte Statistiken berechnen:
+    total_servers = len(servers)
+    online_servers = sum(1 for s in servers if s.status == "online")
+    
+    # Über alle Server die aktiven VPN-Peers aufsummieren
+    total_peers = 0
+    for server in servers:
+        # Wenn der Server online ist, rufe die Health-Metriken ab,
+        # ansonsten setze aktiv auf 0 (oder überspringe ihn)
+        if server.status == "online":
+            metrics = get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor')
+            total_peers += metrics.get('active_peers', 0)
+    
+    return render_template("admin_dashboard.html",
+                           users=users,
+                           servers=servers,
+                           total_servers=total_servers,
+                           online_servers=online_servers,
+                           total_peers=total_peers)
 
 # Route: Benutzerverwaltung – zeigt alle Benutzer in einem eigenen Template
 @app.route('/dashboard/benutzer')
@@ -244,7 +288,8 @@ def dashboard_servers():
             'name': server.name,
             'ip': server.ip,
             'active_peers': metrics.get('active_peers'),
-            'cpu_usage': metrics.get('cpu_usage')
+            'cpu_usage': metrics.get('cpu_usage'),
+            'status': server.status
         }
         server_cards.append(card)
 
@@ -402,9 +447,9 @@ def server_metrics(server_id):
     if current_user.role not in ['admin', 'superuser']:
         return redirect(url_for('admin_login'))
     server = Server.query.get_or_404(server_id)
-    # Hier rufen wir die Health-Metriken des Servers ab. Achte darauf,
-    # dass get_vpn_server_metrics() korrekt implementiert ist und auch die 'running_time'
-    # und 'user_count' extrahiert.
+    # Nur Health-Daten abrufen, wenn der Server online ist
+    if server.status != "online":
+        return render_template('server_metrics.html', server=server, metrics={"error": "Server offline"})
     metrics = get_vpn_server_metrics(server, ssh_port=22, ssh_user='vpnmonitor')
     return render_template('server_metrics.html', server=server, metrics=metrics)
 
@@ -426,8 +471,24 @@ def api_login():
 
 # Weitere API-Routen können analog hinzugefügt werden.
 
+# --  Background Scheduler für Serverstatus-Updates --
+from apscheduler.schedulers.background import BackgroundScheduler
+
+# Erstelle einen Background Scheduler
+scheduler = BackgroundScheduler()
+# Füge einen Job hinzu, der alle 5 Minuten update_server_status() aufruft
+scheduler.add_job(func=update_server_status, trigger="interval", minutes=1)
+scheduler.start()
+
+# Optional: Sorge dafür, dass der Scheduler bei Beendigung der App sauber gestoppt wird
+import atexit
+atexit.register(lambda: scheduler.shutdown())
+
+
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         app.debug = True  # Debugmodus aktivieren
     app.run(host='0.0.0.0', port=5000)
+

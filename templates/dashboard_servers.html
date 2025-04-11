@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
   <meta charset="UTF-8">
   <title>Server Verwaltung</title>
@@ -12,11 +13,13 @@
       cursor: pointer;
       margin-bottom: 20px;
     }
+
     .server-card:hover {
       background-color: #f5f5f5;
     }
   </style>
 </head>
+
 <body>
   <!-- Navigation -->
   <nav class="navbar navbar-default">
@@ -39,59 +42,62 @@
     <h2>Server Übersicht</h2>
     <div class="row">
       {% for card in server_cards %}
-        <div class="col-md-4">
-          <div class="panel panel-default server-card" onclick="location.href='{{ url_for("edit_server", server_id=card.id) }}'">
-            <div class="panel-heading">
-              <h3 class="panel-title">{{ card.name }}</h3>
-            </div>
-            <div class="panel-body">
-              <p><strong>IP:</strong> {{ card.ip }}</p>
-              <p><strong>Aktive VPN-Peers:</strong> {{ card.active_peers }}</p>
-              <p><strong>CPU Usage:</strong>
-                {% if card.cpu_usage != 'n/a' %}
-                  {{ card.cpu_usage }}%
-                {% else %}
-                  n/a
-                {% endif %}
-              </p>
-            </div>
+      <div class="col-md-4">
+        <!-- Wähle Panel-Klasse abhängig vom Status: -->
+        <div class="panel {% if card.status == 'online' %}panel-success{% else %}panel-danger{% endif %} server-card"
+          onclick="location.href='{{ url_for('edit_server', server_id=card.id) }}'">
+          <div class="panel-heading">
+            <h3 class="panel-title">{{ card.name }}</h3>
+          </div>
+          <div class="panel-body">
+            <p><strong>IP:</strong> {{ card.ip }}</p>
+            <p><strong>Aktive VPN-Peers:</strong> {{ card.active_peers }}</p>
+            <p><strong>CPU Usage:</strong>
+              {% if card.cpu_usage != 'n/a' %}
+              {{ card.cpu_usage }}%
+              {% else %}
+              n/a
+              {% endif %}
+            </p>
           </div>
         </div>
+      </div>
       {% endfor %}
     </div>
-    
+
     <!-- Pagination Navigation -->
     <nav>
       <ul class="pagination">
         {% if pagination.has_prev %}
-          <li><a href="{{ url_for('dashboard_servers', page=pagination.prev_num) }}">&laquo; Vorherige</a></li>
+        <li><a href="{{ url_for('dashboard_servers', page=pagination.prev_num) }}">&laquo; Vorherige</a></li>
         {% else %}
-          <li class="disabled"><span>&laquo; Vorherige</span></li>
+        <li class="disabled"><span>&laquo; Vorherige</span></li>
         {% endif %}
-        
+
         {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
-          {% if p %}
-            {% if p == pagination.page %}
-              <li class="active"><span>{{ p }}</span></li>
-            {% else %}
-              <li><a href="{{ url_for('dashboard_servers', page=p) }}">{{ p }}</a></li>
-            {% endif %}
-          {% else %}
-            <li class="disabled"><span>…</span></li>
-          {% endif %}
-        {% endfor %}
-        
-        {% if pagination.has_next %}
-          <li><a href="{{ url_for('dashboard_servers', page=pagination.next_num) }}">Nächste &raquo;</a></li>
+        {% if p %}
+        {% if p == pagination.page %}
+        <li class="active"><span>{{ p }}</span></li>
         {% else %}
-          <li class="disabled"><span>Nächste &raquo;</span></li>
+        <li><a href="{{ url_for('dashboard_servers', page=p) }}">{{ p }}</a></li>
+        {% endif %}
+        {% else %}
+        <li class="disabled"><span>…</span></li>
+        {% endif %}
+        {% endfor %}
+
+        {% if pagination.has_next %}
+        <li><a href="{{ url_for('dashboard_servers', page=pagination.next_num) }}">Nächste &raquo;</a></li>
+        {% else %}
+        <li class="disabled"><span>Nächste &raquo;</span></li>
         {% endif %}
       </ul>
     </nav>
 
   </div>
-  
+
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
 </body>
+
 </html>

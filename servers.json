@@ -1,26 +1,69 @@
-[
-    {
-        "id": 1,
-        "name": "VPN-Server San Francisco",
-        "ip": "64.227.101.26",
-        "port": 51820,
-        "location": "San Francisco, US",
-        "status": "offline"
-    },
-    {
-        "id": 2,
-        "name": "VPN-Server Amsterdam",
-        "ip": "198.51.100.2",
-        "port": 51820,
-        "location": "Amsterdam, NL",
-        "status": "online"
-    },
-    {
-        "name": "VPN-Server London",
-        "ip": "203.0.113.3",
-        "port": 51820,
-        "location": "London, UK",
-        "status": "online",
-        "id": 3
-    }
-]
+{
+    "Code": 1000,
+    "LogicalServers": [
+        {
+            "ID": "server1",
+            "Name": "DE#1",
+            "City": "Frankfurt",
+            "State": "",
+            "EntryCountry": "DE",
+            "ExitCountry": "DE",
+            "Domain": "de1.vpnserver.com",
+            "Tier": 1,
+            "Features": 0,
+            "Location": {
+                "Lat": 50.110924,
+                "Long": 8.682127
+            },
+            "Status": 1,
+            "Load": 45,
+            "Score": 0.85,
+            "HostCountry": "",
+            "GatewayName": "",
+            "Servers": [
+                {
+                    "ID": "de1-1",
+                    "EntryIP": "85.214.132.1",
+                    "ExitIP": "85.214.132.1",
+                    "Domain": "de1.vpnserver.com",
+                    "Status": 1,
+                    "Label": "0",
+                    "X25519PublicKey": "key1abc...",
+                    "Signature": "sig1xyz..."
+                }
+            ]
+        },
+        {
+            "ID": "server2",
+            "Name": "NL#1",
+            "City": "Amsterdam",
+            "State": "",
+            "EntryCountry": "NL",
+            "ExitCountry": "NL",
+            "Domain": "nl1.vpnserver.com",
+            "Tier": 1,
+            "Features": 0,
+            "Location": {
+                "Lat": 52.370216,
+                "Long": 4.895168
+            },
+            "Status": 1,
+            "Load": 35,
+            "Score": 0.92,
+            "HostCountry": "",
+            "GatewayName": "",
+            "Servers": [
+                {
+                    "ID": "nl1-1",
+                    "EntryIP": "89.46.223.1",
+                    "ExitIP": "89.46.223.1",
+                    "Domain": "nl1.vpnserver.com",
+                    "Status": 1,
+                    "Label": "0",
+                    "X25519PublicKey": "key2abc...",
+                    "Signature": "sig2xyz..."
+                }
+            ]
+        }
+    ]
+}

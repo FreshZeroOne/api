@@ -1,0 +1,17 @@
+{
+    "Code": 1000,
+    "LogicalServers": [
+        {
+            "ID": "server1",
+            "Status": 1,
+            "Load": 45,
+            "Score": 0.85
+        },
+        {
+            "ID": "server2", 
+            "Status": 1,
+            "Load": 35,
+            "Score": 0.92
+        }
+    ]
+}

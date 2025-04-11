@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 import os
+import json
 
 
 
@@ -468,6 +469,22 @@ def api_login():
         return jsonify({'msg': 'Bad username or password'}), 401
     access_token = create_access_token(identity=username, additional_claims={"role": user.role})
     return jsonify(access_token=access_token), 200
+
+@app.route('/api/servers', methods=['GET'])
+def get_servers():
+    try:
+        with open('servers.json', 'r') as file:
+            return jsonify(json.load(file))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/server-loads', methods=['GET'])
+def get_server_loads():
+    try:
+        with open('server-loads.json', 'r') as file:
+            return jsonify(json.load(file))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # Weitere API-Routen können analog hinzugefügt werden.
 

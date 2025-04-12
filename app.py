@@ -507,6 +507,39 @@ def get_server_loads():
 # NEUE API-Routen für SRP-Authentifizierung
 # ------------------------------
 
+# /auth/v4/sessions Endpunkt hinzufügen
+@app.route('/auth/v4/sessions', methods=['POST'])
+def create_session_v4():
+    try:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            'created_at': datetime.now(timezone.utc),
+            'authenticated': False
+        }
+        
+        access_token = create_access_token(
+            identity=session_id,
+            expires_delta=timedelta(hours=1)
+        )
+        refresh_token = str(uuid.uuid4())
+        refresh_tokens[refresh_token] = session_id
+        
+        return jsonify({
+            "Code": 1000,
+            "UID": session_id,
+            "AccessToken": access_token,
+            "RefreshToken": refresh_token,
+            "Scopes": ["vpn"],
+            "TokenType": "Bearer"
+            
+        })
+    except Exception as e:
+        logger.error(f"Error creating session: {str(e)}")
+        return jsonify({
+            "Code": ERROR_CODES['SERVER_ERROR'],
+            "Error": "Failed to create session"
+        }), 500
+
 # Auth-Info-Endpunkt für SRP - Schritt 1 der SRP-Authentifizierung
 @app.route('/auth/info', methods=['POST'])
 def auth_info():
@@ -543,12 +576,23 @@ def auth_info():
         
         # SRP-Authentifizierung
         try:
+            salt_bytes = bytes.fromhex(vpn_user.salt)
+            verifier_bytes = bytes.fromhex(vpn_user.verifier)
+            
             # Server generiert ein zufälliges Ephemeral und speichert Session
-            server = srp.Verifier(username, 
-                                bytes.fromhex(vpn_user.salt), 
-                                bytes.fromhex(vpn_user.verifier), 
-                                bytes.fromhex(vpn_user.salt))
+            server = srp.Verifier(
+                username.encode(), 
+                salt_bytes,
+                verifier_bytes,
+                salt_bytes,
+                hash_alg=srp.SHA256
+            )
+            
             s_pub = server.get_challenge()
+            
+            if isinstance(s_pub, tuple):
+                # Bei manchen srp Implementierungen könnte get_challenge() ein Tupel zurückgeben
+                s_pub = s_pub[0]  # Nehme das erste Element vom Tupel
             
             # Session-Token für diese Authentifizierung
             srp_session_id = str(uuid.uuid4())
@@ -559,11 +603,18 @@ def auth_info():
                 'created_at': datetime.now(timezone.utc)
             }
             
+            # Modulus für SRP
+            modulus = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AAAC42DAD33170D04507A33A85521ABDF1CBA64ECFB850458DBEF0A8AEA71575D060C7DB3970F85A6E1E4C7ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6BF12FFA06D98A0864D87602733EC86A64521F2B18177B200CBBE117577A615D6C770988C0BAD946E208E24FA074E5AB3143DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF"
+            
             # Rückgabe der für SRP benötigten Werte
             return jsonify({
-                'Salt': vpn_user.salt,
+                'Code': 1000,
+                'Modulus': modulus,
                 'ServerEphemeral': s_pub.hex(),
-                'SrpSession': srp_session_id
+                'Salt': vpn_user.salt,
+                'SrpSession': srp_session_id,
+                'Version': 4
+                
             })
         except Exception as e:
             logger.error(f"SRP Authentication error: {e}")
@@ -972,6 +1023,43 @@ def verify_2fa():
             'Code': ERROR_CODES['SERVER_ERROR'], 
             'Error': f'Internal server error: {str(e)}'
         }), 500
+
+# Neuer Test-Endpunkt, um einen VPN Admin-Benutzer zu erstellen
+@app.route('/test/create_admin_vpn_user', methods=['GET'])
+def create_test_admin_vpn_user():
+    try:
+        # Überprüfen, ob der Benutzer bereits existiert
+        admin_user = VPNUser.query.filter_by(username='admin').first()
+        if admin_user:
+            return jsonify({
+                "message": "Admin VPN user already exists",
+                "user_id": admin_user.id,
+                "username": admin_user.username
+            })
+        
+        # Admin-Benutzer erstellen
+        salt, verifier = setup_srp_for_user('admin', 'adminpw')
+        
+        admin_vpn_user = VPNUser(
+            username='admin', 
+            salt=salt, 
+            verifier=verifier,
+            two_factor_enabled=False,
+            two_factor_secret=None,
+            two_factor_u2f=json.dumps([]),
+            two_factor_totp=json.dumps([])
+        )
+        
+        db.session.add(admin_vpn_user)
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Admin VPN user created successfully",
+            "user_id": admin_vpn_user.id,
+            "username": admin_vpn_user.username
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Hintergrund-Job für Cleanup-Aufgaben
 def cleanup_sessions():
